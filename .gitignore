@@ -2,3 +2,4 @@ models/raw/
 node_modules/
 *.pem
 .DS_Store
+/data/

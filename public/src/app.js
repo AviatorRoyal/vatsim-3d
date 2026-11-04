@@ -1,5 +1,5 @@
 import { buildAircraftMesh } from './mesh.js';
-import { fetchFeed, findAirport, airportsNear } from './data.js';
+import { fetchFeed, findAirport, airportsNear, fetchTracks, P_GAP, P_GROUND } from './data.js';
 import { loadModelRegistry, resolveModel, CLASS_LABELS } from './models.js';
 
 const { MapboxOverlay, SimpleMeshLayer, ScenegraphLayer, PathLayer, LineLayer, TextLayer, ScatterplotLayer } = deck;
@@ -14,7 +14,8 @@ const R_EARTH = 6371008.8;
 const POLL_MS = 15000;     // VATSIM feed refreshes every 15 s
 const MAX_EXTRAP_S = 30;   // don't dead-reckon further than this past the last report
 const BLEND_MS = 2000;     // smoothing window when a new report corrects our prediction
-const TRAIL_POINTS = 60;   // ~15 min of history at 15 s
+const TRAIL_POINTS = 60;   // ~15 min of history at 15 s (seen by this page; older path comes from the server)
+const TRACKS_RETRY_MS = 120000; // if the path server is unreachable, try again after this
 const GROUND_GS = 45;      // kt — below this and near field elevation → on ground
 const MIN_RUNWAY_FT = 4000;   // nearby airfields shown automatically (smaller ones only when active)
 const MAJOR_RUNWAY_FT = 6500; // gets a large label and extended centrelines
@@ -65,6 +66,8 @@ const state = {
   show: { labels: true, trails: true, stalks: true, rings: true, ground: true, tint: false },
   quality: loadQuality(), // 'high' = detailed models when zoomed in, 'low' = simple shapes only
   aircraft: new Map(),    // callsign -> aircraft record
+  pastVersion: 0,         // bumped when a stored flight path arrives (rebuilds the 'past' trail layer)
+  tracksDownUntil: 0,     // path server unreachable: don't ask again until this time
   atc: [],
   selected: null,
   follow: false,
@@ -205,7 +208,7 @@ function ingestFeed(feed) {
 
     let ac = existing;
     if (!ac) {
-      ac = { callsign: p.callsign, history: [], vs: 0, turnRate: 0, corr: null };
+      ac = { callsign: p.callsign, history: [], vs: 0, turnRate: 0, corr: null, past: null };
       state.aircraft.set(p.callsign, ac);
     } else if (t > ac.base.t) {
       // Smooth: remember where we were drawing it, then fade into the new prediction.
@@ -249,6 +252,7 @@ function ingestFeed(feed) {
   }
 
   for (const cs of state.aircraft.keys()) if (!seen.has(cs)) state.aircraft.delete(cs);
+  loadPastPaths();
   if (state.selected && !state.aircraft.has(state.selected)) select(null);
 
   // ATC: controllers for any airfield in range, plus the primary's IATA code and FIR (e.g. LON_, LTC_).
@@ -309,6 +313,54 @@ function atcRank(cs) {
   const order = ['ATIS', 'DEL', 'GND', 'TWR', 'APP', 'DEP', 'CTR', 'FSS'];
   const i = order.indexOf(cs.split('_').pop());
   return i < 0 ? 99 : i;
+}
+
+/**
+ * Fetch the stored flight path (from the server, which records every pilot all flight) for
+ * aircraft this page hasn't got one for yet: new arrivals in range, or pilots who reconnected.
+ */
+async function loadPastPaths() {
+  if (Date.now() < state.tracksDownUntil) return;
+  const want = [...state.aircraft.values()].filter((ac) => !ac.past && !ac.pastPending);
+  if (!want.length) return;
+  for (const ac of want) ac.pastPending = true;
+  try {
+    const tracks = await fetchTracks(want.map((ac) => ac.callsign));
+    for (const ac of want) {
+      const tr = tracks[ac.callsign];
+      // Only paths of this pilot's connection (same CID); [] = nothing stored yet.
+      ac.past = tr && tr.cid === ac.cid ? tr.points : [];
+      ac.pastInfo = tr && tr.cid === ac.cid ? { start: tr.start, gaps: tr.points.filter((p) => p[4] & P_GAP).length } : null;
+      ac.pastCache = null;
+    }
+    state.pastVersion++;
+  } catch (err) {
+    console.warn(`Stored flight paths unavailable (${err.message}); showing only what this page has seen.`);
+    state.tracksDownUntil = Date.now() + TRACKS_RETRY_MS;
+  } finally {
+    for (const ac of want) ac.pastPending = false;
+  }
+}
+
+/** The stored path as drawable segments: solid runs, and straight reconnect lines between them. */
+function pastSegments(ac) {
+  const key = `${state.exag}|${state.airport?.icao}`;
+  if (ac.pastCache?.key === key) return ac.pastCache;
+  const solid = [], gaps = [];
+  let run = [];
+  for (const pt of ac.past || []) {
+    const pos = [pt[0], pt[1], heightM(pt[2], pt[4] & P_GROUND)];
+    if (pt[4] & P_GAP && run.length) {
+      gaps.push([run[run.length - 1], pos]);
+      if (run.length > 1) solid.push(run);
+      run = [];
+    }
+    run.push(pos);
+  }
+  if (run.length) solid.push(run);
+  const lastT = ac.past?.length ? ac.past[ac.past.length - 1][3] * 1000 : 0;
+  ac.pastCache = { key, solid, gaps, last: run[run.length - 1] || null, lastT };
+  return ac.pastCache;
 }
 
 async function poll() {
@@ -468,12 +520,38 @@ function buildLayers(now) {
   }
 
   if (state.show.trails) {
+    // Stored path (whole flight so far, from the server): its own layer, rebuilt only when a
+    // path arrives, so long paths don't cost anything per frame. Reconnects are straight lines.
+    const pastSolid = [], pastGaps = [];
+    for (const d of list) {
+      if (!d.ac.past?.length) continue;
+      const seg = pastSegments(d.ac);
+      for (const path of seg.solid) pastSolid.push({ ac: d.ac, path });
+      for (const path of seg.gaps) pastGaps.push({ ac: d.ac, path });
+    }
+    const pastKey = `${state.pastVersion}|${state.exag}|${list.map((d) => d.ac.callsign).join(',')}`;
+    if (pastKey !== pastLayerKey) { pastLayerKey = pastKey; pastData = { solid: pastSolid, gaps: pastGaps }; }
+    layers.push(new PathLayer({
+      id: 'trails-past', data: pastData.solid, getPath: (d) => d.path, getColor: (d) => colorOf(d.ac, 110),
+      widthUnits: 'pixels', getWidth: (d) => (d.ac.callsign === state.selected ? 2.5 : 1.3),
+      jointRounded: true, updateTriggers: { getColor: state.selected, getWidth: state.selected },
+    }));
+    layers.push(new PathLayer({
+      id: 'trails-gaps', data: pastData.gaps, getPath: (d) => d.path, getColor: (d) => colorOf(d.ac, 70),
+      widthUnits: 'pixels', getWidth: 1, updateTriggers: { getColor: state.selected },
+    }));
+    // Recent path seen by this page, joined onto the end of the stored one.
     const trails = list
-      .filter((d) => d.ac.history.length)
-      .map((d) => ({
-        ac: d.ac,
-        path: [...d.ac.history.map((s) => [s.lon, s.lat, heightM(s.alt, s.onGround)]), d.pos],
-      }));
+      .filter((d) => d.ac.history.length || d.ac.past?.length)
+      .map((d) => {
+        const seg = d.ac.past?.length ? pastSegments(d.ac) : null;
+        // History times are on this page's clock, stored ones on VATSIM's: compare on VATSIM's.
+        const recent = d.ac.history.filter((s) => !seg || s.t - state.clockOffset > seg.lastT);
+        return {
+          ac: d.ac,
+          path: [...(seg?.last ? [seg.last] : []), ...recent.map((s) => [s.lon, s.lat, heightM(s.alt, s.onGround)]), d.pos],
+        };
+      });
     layers.push(new PathLayer({
       id: 'trails', data: trails, getPath: (d) => d.path, getColor: (d) => colorOf(d.ac, 150),
       widthUnits: 'pixels', getWidth: (d) => (d.ac.callsign === state.selected ? 3 : 1.6),
@@ -588,6 +666,9 @@ function buildLayers(now) {
   }
   return { layers, list };
 }
+
+let pastLayerKey = '';
+let pastData = { solid: [], gaps: [] };
 
 /** Model ids whose ScenegraphLayer has finished loading, read back from deck.gl after each frame. */
 let loadedModels = new Set();
@@ -763,6 +844,10 @@ function updateSelectedPanel(now) {
     ['Sqk', ac.squawk], ['Dist', `${distanceNm(state.airport.lat, state.airport.lon, p.lat, p.lon).toFixed(1)} nm`],
     ['Rules', ac.rules || '–'], ['Cruise', ac.cruise ? formatAlt(+ac.cruise) : '–'],
   ];
+  if (ac.pastInfo) {
+    const since = new Date(ac.pastInfo.start).toISOString().slice(11, 16);
+    rows.push(['Path', `since ${since}Z${ac.pastInfo.gaps ? ` · ${ac.pastInfo.gaps} reconnect${ac.pastInfo.gaps > 1 ? 's' : ''}` : ''}`]);
+  }
   const grid = $('sel-grid');
   grid.replaceChildren();
   for (const [k, v] of rows) {

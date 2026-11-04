@@ -1,0 +1,19 @@
+# Flight-path store (server/tracks.mjs). Installed by deploy/deploy-ec2.sh.
+[Unit]
+Description=VATSIM 3D flight-path store
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+ExecStart=/usr/bin/node /opt/vatsim-3d/tracks.mjs
+Environment=PORT=8787 HOST=127.0.0.1 STORE_FILE=/var/lib/vatsim-tracks/tracks.json
+DynamicUser=yes
+StateDirectory=vatsim-tracks
+Restart=always
+RestartSec=5
+# Shared box (k3s agent): cap it. Normal use is ~100 MB.
+MemoryMax=400M
+Nice=5
+
+[Install]
+WantedBy=multi-user.target

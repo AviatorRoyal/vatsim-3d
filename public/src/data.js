@@ -146,6 +146,26 @@ function haversineNm(lat1, lon1, lat2, lon2) {
   return 2 * 3440.065 * Math.asin(Math.sqrt(a));
 }
 
+// --- Stored flight paths (server/tracks.mjs) ---------------------------------
+// Same origin on EC2 and in local dev (nginx / server.mjs forward /api/). GitHub Pages is HTTPS,
+// so it must call the EC2 API over HTTPS too (a browser blocks plain HTTP from an HTTPS page).
+export const TRACKS_URL = location.hostname.endsWith('github.io')
+  ? 'https://16-4-34-135.sslip.io/api/tracks'
+  : 'api/tracks';
+export const P_GAP = 1;     // point flag: pilot reconnected, straight line from the previous point
+export const P_GROUND = 2;  // point flag: on the ground
+
+/** Stored paths for these callsigns: { callsign: { points: [[lon, lat, altFt, unixSec, flags]], ... } }. */
+export async function fetchTracks(callsigns) {
+  const out = {};
+  for (let i = 0; i < callsigns.length; i += 100) {
+    const r = await fetch(`${TRACKS_URL}?cs=${encodeURIComponent(callsigns.slice(i, i + 100).join(','))}`, { cache: 'no-store', signal: AbortSignal.timeout(8000) });
+    if (!r.ok) throw new Error(`tracks HTTP ${r.status}`);
+    Object.assign(out, (await r.json()).tracks);
+  }
+  return out;
+}
+
 // --- Live feed -------------------------------------------------------------
 
 export async function fetchFeed() {

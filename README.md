@@ -13,7 +13,20 @@ No build step and no npm dependencies. The page loads MapLibre GL 4.7.1 and deck
 The whole app is the static `public/` folder, so it runs from any static host.
 
 - **GitHub Pages**: <https://aviatorroyal.github.io/vatsim-3d/>. `.github/workflows/pages.yml` publishes `public/` on every push to `main`.
-- **EC2 (ap-south-1)**: <http://16.4.34.135/>. nginx serves `/var/www/vatsim-3d`. Run `deploy/deploy-ec2.sh` to push updates. It defaults to `~/Downloads/ec2_in.pem` and `ubuntu@16.4.34.135`.
+- **EC2 (ap-south-1)**: <http://16.4.34.135/>. nginx serves `/var/www/vatsim-3d` and the flight-path API. Run `deploy/deploy-ec2.sh` to push updates (site and API). It defaults to `~/Downloads/ec2_in.pem` and `ubuntu@16.4.34.135`.
+
+### Flight-path store (`server/tracks.mjs`)
+
+A small Node service (no dependencies) on the EC2 host records the path of **every** pilot on VATSIM, so a trail shows the whole flight so far, not just the part this page has seen.
+
+- It polls the Data API every 15 s and keys each flight by CID + callsign. Points are thinned as they arrive: straight, level flight needs few points.
+- **Reconnects.** A pilot who disconnects before landing is kept for **1 hour**. If they come back in that time, the path continues and the client draws a straight, fainter line from the last known point to the new one.
+- **Completed flights.** A flight is complete once it has been airborne and then reports two positions in a row on the ground at an airfield (under 45 kt, within 300 ft of the field elevation, within 5 NM of the field). When that pilot disconnects, the flight is freed straight away. If they take off again while still connected, a new flight starts.
+- The store is saved to disk every minute and on shutdown, so a restart keeps the paths.
+- API: `GET /api/tracks?cs=BAW123,EZY45` returns the points as `[lon, lat, altFt, unixSec, flags]` (flag 1 = reconnect gap, 2 = on the ground). `GET /api/health` gives counts and memory use.
+- nginx forwards `/api/` to it on `127.0.0.1:8787`. It runs as the systemd unit `vatsim-tracks` with a 400 MB memory cap.
+- GitHub Pages is HTTPS, so it calls `https://16-4-34-135.sslip.io/api/` instead. That needs port 443 open on the instance and a Let's Encrypt certificate (`deploy/deploy-ec2.sh --https`). Without them, the Pages site still works but shows only the trail seen since the page opened.
+- Local: run `node server/tracks.mjs` next to `node server.mjs`, which forwards `/api/` to it. Scenario test: `node tools/test-tracks.mjs`.
 
 ## How it works
 
