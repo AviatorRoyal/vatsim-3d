@@ -1,7 +1,8 @@
 import { buildAircraftMesh } from './mesh.js';
 import { fetchFeed, findAirport, airportsNear } from './data.js';
+import { loadModelRegistry, resolveModel, CLASS_LABELS } from './models.js';
 
-const { MapboxOverlay, SimpleMeshLayer, PathLayer, LineLayer, TextLayer, ScatterplotLayer } = deck;
+const { MapboxOverlay, SimpleMeshLayer, ScenegraphLayer, PathLayer, LineLayer, TextLayer, ScatterplotLayer } = deck;
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -17,6 +18,8 @@ const TRAIL_POINTS = 60;   // ~15 min of history at 15 s
 const GROUND_GS = 45;      // kt — below this and near field elevation → on ground
 const MIN_RUNWAY_FT = 4000;   // nearby airfields shown automatically (smaller ones only when active)
 const MAJOR_RUNWAY_FT = 6500; // gets a large label and extended centrelines
+const MODEL_MIN_ZOOM = 11;    // detailed 3D models from this zoom in (approach / airport views)
+const MAX_LIVE_MODELS = 8;    // distinct detailed models on the GPU at once
 
 const COLORS = {
   dep: [255, 159, 67],
@@ -57,7 +60,7 @@ const state = {
   radiusNm: 40,
   exag: 1,
   size: 1,
-  show: { labels: true, trails: true, stalks: true, rings: true, ground: true },
+  show: { labels: true, trails: true, stalks: true, rings: true, ground: true, models: true, tint: false },
   aircraft: new Map(),    // callsign -> aircraft record
   atc: [],
   selected: null,
@@ -226,7 +229,8 @@ function ingestFeed(feed) {
     ac.squawk = p.transponder;
     ac.dep = fp?.departure || '';
     ac.arr = fp?.arrival || '';
-    ac.type = fp?.aircraft_short || fp?.aircraft_faa || '';
+    ac.type = (fp?.aircraft_short || fp?.aircraft_faa || '').split('/')[0].trim().toUpperCase();
+    ac.model = resolveModel(ac.type);
     ac.rules = fp?.flight_rules || '';
     ac.cruise = fp?.altitude || '';
     ac.route = fp?.route || '';
@@ -336,6 +340,7 @@ map.addControl(new maplibregl.ScaleControl({ unit: 'nautical' }), 'bottom-right'
 const overlay = new MapboxOverlay({
   interleaved: false,
   layers: [],
+  onError: (err, layer) => console.error(`deck.gl error${layer ? ` in ${layer.id}` : ''}:`, err?.message || err),
   getTooltip: ({ object, layer }) => {
     if (object && layer?.id === 'airports') {
       const a = state.activity.get(object.icao);
@@ -344,7 +349,8 @@ const overlay = new MapboxOverlay({
     }
     if (!object || !layer || !['aircraft', 'labels', 'pick'].includes(layer.id)) return null;
     const ac = object.ac || object;
-    return { text: `${ac.callsign}  ${ac.type || ''}\n${ac.dep || '----'} → ${ac.arr || '----'}\n${formatAlt(ac.base.alt)}  ${ac.base.gs} kt` };
+    const typeName = ac.model?.typeName ? `\n${ac.model.typeName}` : '';
+    return { text: `${ac.callsign}  ${ac.type || ''}${typeName}\n${ac.dep || '----'} → ${ac.arr || '----'}\n${formatAlt(ac.base.alt)}  ${ac.base.gs} kt` };
   },
   onClick: ({ object, layer }) => {
     if (object && layer?.id === 'airports') { if (object.icao !== state.airport?.icao) setAirport(object.icao); return; }
@@ -352,6 +358,8 @@ const overlay = new MapboxOverlay({
   },
 });
 map.addControl(overlay);
+// Explicit lights: without a LightingEffect, PBR-lit glTF models stop deck.gl drawing anything.
+overlay.setProps({ effects: [new deck.LightingEffect({ amb: new deck.AmbientLight({ color: [255, 255, 255], intensity: 1.2 }), sun: new deck.DirectionalLight({ color: [255, 250, 240], intensity: 2.0, direction: [-1, -2, -3] }) })] });
 map.on('dragstart', () => { if (state.follow) setFollow(false); });
 
 // Keep the airport centred in the visible area, not behind the side panel.
@@ -481,20 +489,73 @@ function buildLayers(now) {
     }));
   }
 
-  // Aircraft size: real-ish scale up close, but never smaller than ~26 px long when zoomed out.
-  const scale = Math.max(55, metresPerPixel() * 26) * state.size;
-  layers.push(new SimpleMeshLayer({
-    id: 'aircraft', data: list, mesh: MESH, getPosition: (d) => d.pos,
-    getOrientation: (d) => {
-      const pitch = d.ac.onGround ? 0 : Math.max(-12, Math.min(15, (d.ac.vs / Math.max(d.ac.base.gs, 120)) * 0.6));
-      const bank = d.ac.onGround ? 0 : Math.max(-25, Math.min(25, d.ac.turnRate * 8));
-      return [pitch, -d.p.hdg, bank];
-    },
-    getColor: (d) => colorOf(d.ac), sizeScale: scale * (0.9),
-    getScale: (d) => (d.ac.onGround ? [0.55, 0.55, 0.55] : [1, 1, 1]),
-    pickable: true, material: { ambient: 0.45, diffuse: 0.65, shininess: 24, specularColor: [80, 80, 80] },
-    updateTriggers: { getColor: state.selected },
-  }));
+  // Size: true scale up close. Zoomed out, each aircraft is enlarged to stay visible, by an amount
+  // that still keeps an A380 visibly bigger than a PA-28 (target length grows with √length).
+  const mpp = metresPerPixel();
+  const zoomScale = (lengthM, onGround) => {
+    const targetPx = (16 + 14 * Math.sqrt(lengthM / 40)) * state.size;
+    const k = Math.max(1, (mpp * targetPx) / lengthM);
+    return onGround ? Math.max(1, k * 0.6) : k;
+  };
+  const orientation = (d) => {
+    const pitch = d.ac.onGround ? 0 : Math.max(-12, Math.min(15, (d.ac.vs / Math.max(d.ac.base.gs, 120)) * 0.6));
+    const bank = d.ac.onGround ? 0 : Math.max(-25, Math.min(25, d.ac.turnRate * 8));
+    return [pitch, -d.p.hdg, bank];
+  };
+
+  // Level of detail. Detailed models cost GPU memory (textures + geometry per model), so they're
+  // only used when zoomed in far enough to see them, for at most MAX_LIVE_MODELS distinct models
+  // (the most common ones in view, plus the selected aircraft's). Everything else uses the
+  // built-in low-poly mesh. A model layer that drops out of the list is freed by deck.gl.
+  const detailed = map.getZoom() >= MODEL_MIN_ZOOM;
+  const wanted = new Map(); // modelId -> count
+  if (state.show.models) {
+    for (const d of list) {
+      const id = d.ac.model?.modelId;
+      if (id && (detailed || d.ac.callsign === state.selected)) wanted.set(id, (wanted.get(id) || 0) + 1);
+    }
+  }
+  const selModel = state.selected && state.aircraft.get(state.selected)?.model?.modelId;
+  const live = new Set([...wanted.entries()].sort((a, b) => b[1] - a[1]).slice(0, MAX_LIVE_MODELS).map(([id]) => id));
+  if (selModel && wanted.has(selModel)) live.add(selModel);
+
+  // A model layer draws nothing until deck.gl has downloaded and parsed its glTF, so until
+  // then its aircraft are also drawn with the placeholder mesh (see modelLayersLoaded()).
+  const byModel = new Map();
+  const placeholder = [];
+  for (const d of list) {
+    const id = d.ac.model?.modelId;
+    const eligible = id && live.has(id) && (detailed || d.ac.callsign === state.selected);
+    if (eligible) {
+      if (!byModel.has(id)) byModel.set(id, []);
+      byModel.get(id).push(d);
+    }
+    if (!eligible || !loadedModels.has(id)) placeholder.push(d);
+  }
+  for (const [modelId, data] of byModel) {
+    const info = data[0].ac.model;
+    layers.push(new ScenegraphLayer({
+      id: `model-${modelId}`, data, scenegraph: info.url, getPosition: (d) => d.pos,
+      getOrientation: orientation,
+      // Real model scale (metres) times the per-aircraft zoom enlargement.
+      sizeScale: 1,
+      getScale: (d) => { const k = zoomScale(info.lengthM, d.ac.onGround); return [k, k, k]; },
+      // Untinted = the model's own livery; selected aircraft are always highlighted.
+      getColor: (d) => (d.ac.callsign === state.selected ? [255, 236, 120, 255] : state.show.tint ? colorOf(d.ac) : [255, 255, 255, 255]),
+      _lighting: 'pbr',
+      updateTriggers: { getColor: [state.selected, state.show.tint], getScale: [Math.round(mpp * 10), state.size] },
+    }));
+  }
+  if (placeholder.length) {
+    layers.push(new SimpleMeshLayer({
+      id: 'aircraft', data: placeholder, mesh: MESH, getPosition: (d) => d.pos,
+      getOrientation: orientation,
+      getColor: (d) => colorOf(d.ac), sizeScale: 1,
+      getScale: (d) => { const L = d.ac.model?.lengthM || 35; const s = L * zoomScale(L, d.ac.onGround); return [s, s, s]; },
+      pickable: true, material: { ambient: 0.45, diffuse: 0.65, shininess: 24, specularColor: [80, 80, 80] },
+      updateTriggers: { getColor: state.selected, getScale: [Math.round(mpp * 10), state.size] },
+    }));
+  }
   // Invisible, generous pick target so small aircraft are easy to click.
   layers.push(new ScatterplotLayer({
     id: 'pick', data: list, getPosition: (d) => d.pos, getRadius: 14, radiusUnits: 'pixels',
@@ -518,6 +579,18 @@ function buildLayers(now) {
   return { layers, list };
 }
 
+/** Model ids whose ScenegraphLayer has finished loading, read back from deck.gl after each frame. */
+let loadedModels = new Set();
+function modelLayersLoaded() {
+  const lm = overlay._deck?.layerManager; // deck.gl's layer manager (instances, not descriptors)
+  if (!lm) return loadedModels;
+  const s = new Set();
+  for (const layer of lm.getLayers()) {
+    if (layer.id.startsWith('model-') && layer.isLoaded && layer.state?.scenegraph) s.add(layer.id.slice(6));
+  }
+  return s;
+}
+
 let lastFrame = 0;
 function frame(now) {
   requestAnimationFrame(frame);
@@ -527,6 +600,7 @@ function frame(now) {
   const built = buildLayers(t);
   if (!built.layers) return;
   overlay.setProps({ layers: built.layers });
+  loadedModels = modelLayersLoaded();
 
   if (state.follow && state.selected) {
     const d = built.list.find((x) => x.ac.callsign === state.selected);
@@ -663,6 +737,13 @@ function updateSelectedPanel(now) {
     grid.append(dt, dd);
   }
   $('sel-grid').title = ac.route;
+
+  // Which ICAO type / class this is, and whether we draw its own model or the class's generic one.
+  const m = ac.model;
+  $('sel-typename').textContent = m?.typeName || (ac.type ? 'Type not in ICAO Doc 8643' : 'No flight plan');
+  $('sel-model').textContent = !m?.modelId ? ''
+    : m.specific ? `3D model: ${m.modelName}`
+    : `${CLASS_LABELS[m.cls] || m.cls} · generic model (${m.modelName})`;
 }
 
 // ---------------------------------------------------------------------------
@@ -684,7 +765,17 @@ async function setAirport(icao) {
   $('airport-name').textContent = ap.name;
   document.title = `${ap.icao} · VATSIM 3D`;
   history.replaceState(null, '', `#${ap.icao}`);
-  map.flyTo({ center: [ap.lon, ap.lat], zoom: 9.6, pitch: 62, bearing: -25, duration: 1500 });
+  // Optional ?zoom=&pitch=&bearing= for the first view (e.g. ?zoom=13 to start at the airport).
+  const q = new URLSearchParams(location.search);
+  const first = !setAirport.done;
+  setAirport.done = true;
+  map.flyTo({
+    center: [ap.lon, ap.lat],
+    zoom: first && q.has('zoom') ? +q.get('zoom') : 9.6,
+    pitch: first && q.has('pitch') ? +q.get('pitch') : 62,
+    bearing: first && q.has('bearing') ? +q.get('bearing') : -25,
+    duration: first && q.has('zoom') ? 0 : 1500,
+  });
 
   setStatus('Loading airfields and runways…');
   await refreshNearby();
@@ -736,4 +827,5 @@ $('collapse').onclick = () => { $('panel').classList.add('hidden'); $('expand').
 $('expand').onclick = () => { $('panel').classList.remove('hidden'); $('expand').hidden = true; updatePadding(); };
 window.addEventListener('keydown', (e) => { if (e.key === 'Escape') select(null); });
 
-setAirport((location.hash.slice(1) || 'EGLL').slice(0, 4));
+// Type list + model manifest first (small), so the first feed already resolves models.
+loadModelRegistry().finally(() => setAirport((location.hash.slice(1) || 'EGLL').slice(0, 4)));

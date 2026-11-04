@@ -1,0 +1,481 @@
+{
+ "classes": {
+  "airliner_narrow": "b738",
+  "regional_jet": "e190",
+  "airliner_wide": "b772",
+  "airliner_quad": "b744",
+  "bizjet": "citation",
+  "turboprop": "q400",
+  "turboprop_light": "pc12",
+  "ga_turboprop": "pc12",
+  "ga_single": "pa28",
+  "ga_twin": "pa28",
+  "glider": "as21",
+  "helicopter": "heli",
+  "gyrocopter": "heli",
+  "helicopter_tandem": "ch47",
+  "tiltrotor": "ch47",
+  "fighter": "f16",
+  "balloon": "balloon",
+  "airship": "balloon",
+  "drone": "heli",
+  "ground": "pa28",
+  "unknown": "b738"
+ },
+ "models": [
+  {
+   "id": "a320",
+   "name": "Airbus A320",
+   "file": "fr24-v2/a320.glb",
+   "nose": "-z",
+   "up": "+y",
+   "types": [
+    "A318",
+    "A319",
+    "A320",
+    "A19N",
+    "A20N"
+   ],
+   "author": "FlightGear contributors via Flightradar24 fr24-3d-models",
+   "licence": "GPL-2.0",
+   "source": "https://github.com/Flightradar24/fr24-3d-models (from https://github.com/FGMEMBERS/A320-family)"
+  },
+  {
+   "id": "a321",
+   "name": "Airbus A321",
+   "file": "fr24-v2/a321.glb",
+   "nose": "-z",
+   "up": "+y",
+   "types": [
+    "A321",
+    "A21N"
+   ],
+   "author": "FlightGear contributors via Flightradar24 fr24-3d-models",
+   "licence": "GPL-2.0",
+   "source": "https://github.com/Flightradar24/fr24-3d-models (from https://github.com/FGMEMBERS/A320-family)"
+  },
+  {
+   "id": "a332",
+   "name": "Airbus A330-200",
+   "file": "fr24-v2/a332.glb",
+   "nose": "-z",
+   "up": "+y",
+   "types": [
+    "A332",
+    "A338"
+   ],
+   "author": "FlightGear contributors via Flightradar24 fr24-3d-models",
+   "licence": "GPL-2.0",
+   "source": "https://github.com/Flightradar24/fr24-3d-models (from https://github.com/FGMEMBERS/A330-200)"
+  },
+  {
+   "id": "a333",
+   "name": "Airbus A330-300",
+   "file": "fr24-v2/a333.glb",
+   "nose": "-z",
+   "up": "+y",
+   "types": [
+    "A333",
+    "A339"
+   ],
+   "author": "FlightGear contributors via Flightradar24 fr24-3d-models",
+   "licence": "GPL-2.0",
+   "source": "https://github.com/Flightradar24/fr24-3d-models (from https://github.com/FGMEMBERS/A330-300)"
+  },
+  {
+   "id": "a359",
+   "name": "Airbus A350-900",
+   "file": "fr24-v2/a359.glb",
+   "nose": "-z",
+   "up": "+y",
+   "types": [
+    "A359",
+    "A35K"
+   ],
+   "author": "FlightGear contributors via Flightradar24 fr24-3d-models",
+   "licence": "GPL-2.0",
+   "source": "https://github.com/Flightradar24/fr24-3d-models (from https://github.com/FGMEMBERS/A350XWB)"
+  },
+  {
+   "id": "a380",
+   "name": "Airbus A380",
+   "file": "fr24-v2/a380.glb",
+   "nose": "-z",
+   "up": "+y",
+   "types": [
+    "A388"
+   ],
+   "author": "FlightGear contributors via Flightradar24 fr24-3d-models",
+   "licence": "GPL-2.0",
+   "source": "https://github.com/Flightradar24/fr24-3d-models (from https://github.com/FGMEMBERS/A380-omega)"
+  },
+  {
+   "id": "b738",
+   "name": "Boeing 737-800",
+   "file": "fr24-v2/b738.glb",
+   "nose": "-z",
+   "up": "+y",
+   "types": [
+    "B731",
+    "B732",
+    "B733",
+    "B734",
+    "B735",
+    "B736",
+    "B737",
+    "B738",
+    "B739",
+    "B37M",
+    "B38M",
+    "B39M",
+    "B3XM",
+    "E737",
+    "P8"
+   ],
+   "author": "FlightGear contributors via Flightradar24 fr24-3d-models",
+   "licence": "GPL-2.0",
+   "source": "https://github.com/Flightradar24/fr24-3d-models (from https://github.com/FGMEMBERS/737-800)"
+  },
+  {
+   "id": "b744",
+   "name": "Boeing 747-400",
+   "file": "fr24-v2/b744.glb",
+   "nose": "-z",
+   "up": "+y",
+   "types": [
+    "B741",
+    "B742",
+    "B743",
+    "B744",
+    "B74R",
+    "B74S",
+    "BLCF"
+   ],
+   "author": "FlightGear contributors via Flightradar24 fr24-3d-models",
+   "licence": "GPL-2.0",
+   "source": "https://github.com/Flightradar24/fr24-3d-models (from https://github.com/FGMEMBERS/747-400)"
+  },
+  {
+   "id": "b748",
+   "name": "Boeing 747-8",
+   "file": "fr24-v2/b748.glb",
+   "nose": "-z",
+   "up": "+y",
+   "types": [
+    "B748"
+   ],
+   "author": "FlightGear contributors via Flightradar24 fr24-3d-models",
+   "licence": "GPL-2.0",
+   "source": "https://github.com/Flightradar24/fr24-3d-models (from https://github.com/FGMEMBERS/747-8i)"
+  },
+  {
+   "id": "b752",
+   "name": "Boeing 757-200",
+   "file": "fr24-v2/b752.glb",
+   "nose": "-z",
+   "up": "+y",
+   "types": [
+    "B752",
+    "B753"
+   ],
+   "author": "FlightGear contributors via Flightradar24 fr24-3d-models",
+   "licence": "GPL-2.0",
+   "source": "https://github.com/Flightradar24/fr24-3d-models (from https://github.com/FGMEMBERS/757-200)"
+  },
+  {
+   "id": "b763",
+   "name": "Boeing 767-300",
+   "file": "fr24-v2/b763.glb",
+   "nose": "-z",
+   "up": "+y",
+   "types": [
+    "B762",
+    "B763",
+    "B764",
+    "E767"
+   ],
+   "author": "FlightGear contributors via Flightradar24 fr24-3d-models",
+   "licence": "GPL-2.0",
+   "source": "https://github.com/Flightradar24/fr24-3d-models (from https://github.com/FGMEMBERS/767-300)"
+  },
+  {
+   "id": "b772",
+   "name": "Boeing 777-200",
+   "file": "fr24-v2/b772.glb",
+   "nose": "-z",
+   "up": "+y",
+   "types": [
+    "B772",
+    "B77L",
+    "B778"
+   ],
+   "author": "FlightGear contributors via Flightradar24 fr24-3d-models",
+   "licence": "GPL-2.0",
+   "source": "https://github.com/Flightradar24/fr24-3d-models (from https://github.com/FGMEMBERS/777)"
+  },
+  {
+   "id": "b773",
+   "name": "Boeing 777-300",
+   "file": "fr24-v2/b773.glb",
+   "nose": "-z",
+   "up": "+y",
+   "types": [
+    "B773",
+    "B77W",
+    "B779"
+   ],
+   "author": "FlightGear contributors via Flightradar24 fr24-3d-models",
+   "licence": "GPL-2.0",
+   "source": "https://github.com/Flightradar24/fr24-3d-models (from https://github.com/FGMEMBERS/777)"
+  },
+  {
+   "id": "b788",
+   "name": "Boeing 787-8",
+   "file": "fr24-v2/b788.glb",
+   "nose": "-z",
+   "up": "+y",
+   "types": [
+    "B788"
+   ],
+   "author": "FlightGear contributors via Flightradar24 fr24-3d-models",
+   "licence": "GPL-2.0",
+   "source": "https://github.com/Flightradar24/fr24-3d-models (from https://github.com/FGMEMBERS/787-8)"
+  },
+  {
+   "id": "b789",
+   "name": "Boeing 787-9",
+   "file": "fr24-v2/b789.glb",
+   "nose": "-z",
+   "up": "+y",
+   "types": [
+    "B789",
+    "B78X"
+   ],
+   "author": "FlightGear contributors via Flightradar24 fr24-3d-models",
+   "licence": "GPL-2.0",
+   "source": "https://github.com/Flightradar24/fr24-3d-models (from https://github.com/FGMEMBERS/787-9)"
+  },
+  {
+   "id": "cs300",
+   "name": "Airbus A220-300",
+   "file": "fr24-v2/cs300.glb",
+   "nose": "-z",
+   "up": "+y",
+   "types": [
+    "BCS1",
+    "BCS3"
+   ],
+   "author": "FlightGear contributors via Flightradar24 fr24-3d-models",
+   "licence": "GPL-2.0",
+   "source": "https://github.com/Flightradar24/fr24-3d-models (from https://github.com/FGMEMBERS/CSeries)"
+  },
+  {
+   "id": "e190",
+   "name": "Embraer E190",
+   "file": "fr24-v2/e190.glb",
+   "nose": "-z",
+   "up": "+y",
+   "types": [
+    "E170",
+    "E75L",
+    "E75S",
+    "E190",
+    "E195",
+    "E290",
+    "E295",
+    "E275"
+   ],
+   "author": "FlightGear contributors via Flightradar24 fr24-3d-models",
+   "licence": "GPL-2.0",
+   "source": "https://github.com/Flightradar24/fr24-3d-models (from https://github.com/FGMEMBERS/E-jet-family)"
+  },
+  {
+   "id": "crj900",
+   "name": "Bombardier CRJ900",
+   "file": "fr24-v2/crj900.glb",
+   "nose": "-z",
+   "up": "+y",
+   "types": [
+    "CRJ1",
+    "CRJ2",
+    "CRJ7",
+    "CRJ9",
+    "CRJX"
+   ],
+   "author": "FlightGear contributors via Flightradar24 fr24-3d-models",
+   "licence": "GPL-2.0",
+   "source": "https://github.com/Flightradar24/fr24-3d-models (from https://github.com/FGMEMBERS/CRJ700-family)"
+  },
+  {
+   "id": "q400",
+   "name": "De Havilland Dash 8 Q400",
+   "file": "fr24-v2/q400.glb",
+   "nose": "-z",
+   "up": "+y",
+   "types": [
+    "DH8A",
+    "DH8B",
+    "DH8C",
+    "DH8D"
+   ],
+   "author": "FlightGear contributors via Flightradar24 fr24-3d-models",
+   "licence": "GPL-2.0",
+   "source": "https://github.com/Flightradar24/fr24-3d-models (from https://github.com/FGMEMBERS/Q400)"
+  },
+  {
+   "id": "atr42",
+   "name": "ATR 42",
+   "file": "fr24-v2/atr42.glb",
+   "nose": "-z",
+   "up": "+y",
+   "types": [
+    "AT43",
+    "AT44",
+    "AT45",
+    "AT46",
+    "AT72",
+    "AT73",
+    "AT75",
+    "AT76"
+   ],
+   "author": "FlightGear contributors via Flightradar24 fr24-3d-models",
+   "licence": "GPL-2.0",
+   "source": "https://github.com/Flightradar24/fr24-3d-models (from https://github.com/FGMEMBERS/ATR-42-500)"
+  },
+  {
+   "id": "citation",
+   "name": "Cessna Citation II",
+   "file": "fr24-v2/citation.glb",
+   "nose": "-z",
+   "up": "+y",
+   "types": [
+    "C500",
+    "C501",
+    "C510",
+    "C525",
+    "C526",
+    "C25A",
+    "C25B",
+    "C25C",
+    "C25M",
+    "C550",
+    "C551",
+    "C560",
+    "C56X",
+    "C650",
+    "C680",
+    "C68A",
+    "C700",
+    "C750"
+   ],
+   "author": "FlightGear contributors via Flightradar24 fr24-3d-models",
+   "licence": "GPL-2.0",
+   "source": "https://github.com/Flightradar24/fr24-3d-models (from https://github.com/FGMEMBERS/Citation)"
+  },
+  {
+   "id": "heli",
+   "name": "Eurocopter EC135",
+   "file": "fr24-v2/heli.glb",
+   "nose": "-z",
+   "up": "+y",
+   "types": [
+    "EC35",
+    "EC45",
+    "H145",
+    "EC30",
+    "EC55"
+   ],
+   "author": "FlightGear contributors via Flightradar24 fr24-3d-models",
+   "licence": "GPL-2.0",
+   "source": "https://github.com/Flightradar24/fr24-3d-models (from https://github.com/FGMEMBERS/ec135)"
+  },
+  {
+   "id": "pa28",
+   "name": "Piper PA-28",
+   "file": "fr24-v2/pa28.glb",
+   "nose": "-z",
+   "up": "+y",
+   "types": [
+    "P28A",
+    "P28B",
+    "P28R",
+    "P28T",
+    "P28U",
+    "PA28"
+   ],
+   "author": "FlightGear contributors via Flightradar24 fr24-3d-models",
+   "licence": "GPL-2.0",
+   "source": "https://github.com/Flightradar24/fr24-3d-models (from https://github.com/FGMEMBERS/Piper-PA-28)"
+  },
+  {
+   "id": "pc12",
+   "name": "Pilatus PC-12",
+   "file": "fam/PC12.glb",
+   "nose": "+z",
+   "up": "+y",
+   "types": [
+    "PC12"
+   ],
+   "author": "FlightGear contributors via FlightAirMap-3dmodels",
+   "licence": "GPL-2.0",
+   "source": "https://github.com/Ysurac/FlightAirMap-3dmodels/tree/master/pc12"
+  },
+  {
+   "id": "as21",
+   "name": "Schleicher ASK 21",
+   "file": "fam/AS21.glb",
+   "nose": "+z",
+   "up": "+y",
+   "types": [
+    "AS21",
+    "GLID"
+   ],
+   "author": "FlightGear contributors via FlightAirMap-3dmodels",
+   "licence": "GPL-2.0",
+   "source": "https://github.com/Ysurac/FlightAirMap-3dmodels/tree/master/ask21"
+  },
+  {
+   "id": "ch47",
+   "name": "Boeing CH-47 Chinook",
+   "file": "fg-v2/ch47.glb",
+   "nose": "-x",
+   "up": "+y",
+   "types": [
+    "H47",
+    "H46"
+   ],
+   "author": "FlightGear CH47 contributors (converted from AC3D)",
+   "licence": "GPL-2.0",
+   "source": "https://github.com/FGMEMBERS/CH47"
+  },
+  {
+   "id": "f16",
+   "name": "General Dynamics F-16",
+   "file": "fg-v2/f16.glb",
+   "nose": "-x",
+   "up": "+y",
+   "lengthM": 15.06,
+   "types": [
+    "F16",
+    "F16X"
+   ],
+   "author": "Erik Hofman and FlightGear f16 contributors (converted from AC3D)",
+   "licence": "GPL-2.0",
+   "source": "https://github.com/FGMEMBERS/f16"
+  },
+  {
+   "id": "balloon",
+   "name": "Weather balloon",
+   "file": "gen/weather-balloon.glb",
+   "nose": "+z",
+   "up": "+y",
+   "types": [
+    "BALL",
+    "SHIP"
+   ],
+   "author": "vatsim-3d (generated by tools/make-weather-balloon.mjs)",
+   "licence": "Same as this project",
+   "source": "tools/make-weather-balloon.mjs"
+  }
+ ]
+}

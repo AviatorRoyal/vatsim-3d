@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Model Gallery</title>
+  <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css" />
+  <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+  <script src="https://unpkg.com/deck.gl@9.0.38/dist.min.js"></script>
+  <style>
+    html, body { margin: 0; height: 100%; background: #0b0f14; color: #dfe6ee; font: 13px system-ui, sans-serif; }
+    #map { position: absolute; inset: 0; }
+    #info { position: absolute; top: 10px; left: 10px; background: rgba(14,19,26,.9); padding: 8px 12px; border-radius: 8px; max-width: 340px; }
+    a { color: #3ad1ff; }
+  </style>
+</head>
+<body>
+  <div id="map"></div>
+  <div id="info"><b>3D model gallery</b><br>Every model at true scale, nose pointing east (heading 090), parked on the Heathrow apron.
+    <a href="./">Back to the live view</a></div>
+  <script type="module">
+    const { MapboxOverlay, ScenegraphLayer, TextLayer } = deck;
+    const manifest = await (await fetch('models/manifest.json')).json();
+    const ids = Object.keys(manifest.models);
+    // Two rows on the apron south of 09L/27R, spaced by model size.
+    const origin = [-0.4775, 51.4705];
+    const mPerDegLon = 111320 * Math.cos(origin[1] * Math.PI / 180);
+    let x = 0, row = 0;
+    const items = ids.map((id, i) => {
+      const m = manifest.models[id];
+      if (i === 14) { x = 0; row = 1; }
+      const pos = [origin[0] + (x + m.lengthM / 2) / mPerDegLon, origin[1] - row * 110 / 111320, 0];
+      x += m.lengthM + 18;
+      return { id, m, pos };
+    });
+    const center = items[7].pos;
+    const params = new URLSearchParams(location.search);
+    const map = new maplibregl.Map({
+      container: 'map', style: 'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json',
+      // ?focus=<model id> centres on one model (handy for checking orientation).
+      center: params.has('focus') ? (items.find((d) => d.id === params.get('focus'))?.pos || center).slice(0, 2)
+        : [center[0] + 0.004, center[1] - 0.0005], zoom: +(params.get('z') || 16.2),
+      pitch: +(params.get('pitch') || 55), bearing: +(params.get('bearing') || -20), maxPitch: 85,
+    });
+    const layers = items.map((d) => new ScenegraphLayer({
+      id: `g-${d.id}`, data: [d], scenegraph: `models/${d.m.file}`, getPosition: (o) => o.pos,
+      getOrientation: [0, -90, 0], sizeScale: 1, _lighting: 'pbr',
+    }));
+    layers.push(new TextLayer({
+      id: 'names', data: items, getPosition: (d) => [d.pos[0], d.pos[1] + 32 / 111320, 0], getText: (d) => d.m.name,
+      getSize: 11, getColor: [230, 236, 244], background: true, getBackgroundColor: [8, 12, 18, 180],
+      getPixelOffset: (d) => [0, ids.indexOf(d.id) % 2 ? 14 : -4],
+    }));
+    const overlay = new MapboxOverlay({ layers });
+    map.addControl(overlay);
+    window.__galleryReady = true;
+  </script>
+</body>
+</html>

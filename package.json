@@ -1,0 +1,17 @@
+{
+  "name": "vatsim-3d",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node server.mjs",
+    "build:types": "node tools/build-types.mjs",
+    "build:models": "node tools/normalize-models.mjs"
+  },
+  "devDependencies": {
+    "@gltf-transform/core": "^4.5.1",
+    "@gltf-transform/extensions": "^4.5.1",
+    "@gltf-transform/functions": "^4.5.1",
+    "gltf-pipeline": "^4.3.1",
+    "sharp": "^0.35.5"
+  }
+}

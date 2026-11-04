@@ -41,6 +41,7 @@
         <button id="sel-close" class="icon-btn" title="Deselect">×</button>
       </div>
       <div id="sel-route" class="route"></div>
+      <div class="small"><span id="sel-typename"></span><br /><span id="sel-model" class="muted"></span></div>
       <dl id="sel-grid" class="grid"></dl>
       <div class="row">
         <button id="sel-follow">Follow</button>
@@ -62,6 +63,8 @@
         <label><input type="checkbox" id="t-stalks" checked /> Altitude lines</label>
         <label><input type="checkbox" id="t-rings" checked /> Range rings</label>
         <label><input type="checkbox" id="t-ground" checked /> Ground traffic</label>
+        <label><input type="checkbox" id="t-models" checked /> 3D models</label>
+        <label><input type="checkbox" id="t-tint" /> Tint models</label>
       </div>
       <label class="slider">Basemap
         <select id="basemap">
@@ -103,7 +106,10 @@
 
     <footer class="muted small">
       Data: <a href="https://vatsim.dev/services/apis" target="_blank" rel="noopener">VATSIM Data API</a>,
-      VATSpy, OurAirports. Not for real-world navigation.
+      VATSpy, OurAirports, ICAO Doc 8643 (via tar1090-db).
+      3D models: FlightGear contributors via Flightradar24 &amp; FlightAirMap,
+      <a href="https://github.com/AviatorRoyal/vatsim-3d/blob/main/MODELS.md" target="_blank" rel="noopener">GPL-2.0 credits</a>.
+      Not for real-world navigation.
     </footer>
   </aside>
   <button id="expand" class="icon-btn floating" title="Show panel" hidden>›</button>
