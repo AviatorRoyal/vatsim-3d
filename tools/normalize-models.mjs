@@ -11,7 +11,7 @@
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { NodeIO, getBounds } from '@gltf-transform/core';
 import { ALL_EXTENSIONS } from '@gltf-transform/extensions';
-import { dedup, prune, weld } from '@gltf-transform/functions';
+import { dedup, flatten, join, palette, prune, weld } from '@gltf-transform/functions';
 import sharp from 'sharp';
 
 const MAX_TEXTURE = 512; // px; keeps GPU memory low (each 512² texture ≈ 1.3 MB with mipmaps)
@@ -93,7 +93,9 @@ for (const m of sources.models) {
 
   // Drop animations (rotor spin etc. would need per-instance timing) and tidy up.
   for (const a of doc.getRoot().listAnimations()) a.dispose();
-  await doc.transform(dedup(), weld(), prune());
+  // Fewer draw calls: flatten the node tree, merge plain-colour materials into one palette
+  // texture, then join everything sharing a material (~100 primitives per model -> a handful).
+  await doc.transform(dedup(), flatten(), palette({ min: 2 }), join(), weld(), prune());
   await shrinkTextures(doc);
 
   const outFile = `${m.id}.glb`;

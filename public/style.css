@@ -87,3 +87,12 @@ summary { cursor: pointer; font-weight: 600; color: var(--muted); text-transform
   #panel { top: auto; left: 8px; right: 8px; bottom: 8px; width: auto; max-height: 48vh; }
   .floating { top: auto; bottom: 12px; left: 12px; }
 }
+
+/* Model quality switch, floating top-right next to the map's zoom/compass buttons. */
+.seg {
+  position: absolute; top: 10px; right: 52px; z-index: 2; display: flex; align-items: center; gap: 2px;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 3px; backdrop-filter: blur(6px);
+}
+.seg-label { color: var(--muted); font-size: 11px; padding: 0 6px 0 4px; text-transform: uppercase; letter-spacing: 0.06em; }
+.seg button { border: 1px solid transparent; background: transparent; padding: 4px 10px; border-radius: 6px; }
+.seg button[aria-checked="true"] { background: var(--btn); border-color: var(--accent); color: var(--accent); }

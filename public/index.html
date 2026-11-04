@@ -63,7 +63,6 @@
         <label><input type="checkbox" id="t-stalks" checked /> Altitude lines</label>
         <label><input type="checkbox" id="t-rings" checked /> Range rings</label>
         <label><input type="checkbox" id="t-ground" checked /> Ground traffic</label>
-        <label><input type="checkbox" id="t-models" checked /> 3D models</label>
         <label><input type="checkbox" id="t-tint" /> Tint models</label>
       </div>
       <label class="slider">Basemap
@@ -113,6 +112,11 @@
     </footer>
   </aside>
   <button id="expand" class="icon-btn floating" title="Show panel" hidden>›</button>
+  <div id="quality" class="seg" role="radiogroup" aria-label="Aircraft model quality">
+    <span class="seg-label">Models</span>
+    <button type="button" data-q="high" role="radio" title="Detailed 3D models when zoomed in (heavier)">High</button>
+    <button type="button" data-q="low" role="radio" title="Simple aircraft shapes at every zoom (lightest)">Low</button>
+  </div>
 
   <script type="module" src="src/app.js"></script>
 </body>

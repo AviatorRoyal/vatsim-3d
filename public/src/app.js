@@ -19,6 +19,8 @@ const GROUND_GS = 45;      // kt — below this and near field elevation → on 
 const MIN_RUNWAY_FT = 4000;   // nearby airfields shown automatically (smaller ones only when active)
 const MAJOR_RUNWAY_FT = 6500; // gets a large label and extended centrelines
 const MODEL_MIN_ZOOM = 11;    // detailed 3D models from this zoom in (approach / airport views)
+const MODEL_EXIT_ZOOM = 10.5; // ...and back to simple shapes below this (hysteresis: no flip-flopping at 11)
+const MAX_KEPT_MODELS = 12;   // loaded models kept on the GPU (hidden) so zooming back in is instant
 const MAX_LIVE_MODELS = 8;    // distinct detailed models on the GPU at once
 
 const COLORS = {
@@ -60,7 +62,8 @@ const state = {
   radiusNm: 40,
   exag: 1,
   size: 1,
-  show: { labels: true, trails: true, stalks: true, rings: true, ground: true, models: true, tint: false },
+  show: { labels: true, trails: true, stalks: true, rings: true, ground: true, tint: false },
+  quality: loadQuality(), // 'high' = detailed models when zoomed in, 'low' = simple shapes only
   aircraft: new Map(),    // callsign -> aircraft record
   atc: [],
   selected: null,
@@ -507,9 +510,11 @@ function buildLayers(now) {
   // only used when zoomed in far enough to see them, for at most MAX_LIVE_MODELS distinct models
   // (the most common ones in view, plus the selected aircraft's). Everything else uses the
   // built-in low-poly mesh. A model layer that drops out of the list is freed by deck.gl.
-  const detailed = map.getZoom() >= MODEL_MIN_ZOOM;
+  const z = map.getZoom();
+  detailedOn = z >= MODEL_MIN_ZOOM || (detailedOn && z >= MODEL_EXIT_ZOOM);
+  const detailed = detailedOn;
   const wanted = new Map(); // modelId -> count
-  if (state.show.models) {
+  if (state.quality === 'high') {
     for (const d of list) {
       const id = d.ac.model?.modelId;
       if (id && (detailed || d.ac.callsign === state.selected)) wanted.set(id, (wanted.get(id) || 0) + 1);
@@ -525,17 +530,22 @@ function buildLayers(now) {
   const placeholder = [];
   for (const d of list) {
     const id = d.ac.model?.modelId;
-    const eligible = id && live.has(id) && (detailed || d.ac.callsign === state.selected);
+    const eligible = id && live.has(id);
     if (eligible) {
       if (!byModel.has(id)) byModel.set(id, []);
       byModel.get(id).push(d);
     }
     if (!eligible || !loadedModels.has(id)) placeholder.push(d);
   }
-  for (const [modelId, data] of byModel) {
-    const info = data[0].ac.model;
+  // Model layers that were in use recently stay alive with no data (and invisible), so their
+  // parsed glTF, textures and shaders survive zooming out and back in. Least recently used go.
+  for (const id of byModel.keys()) { keptModels.delete(id); keptModels.set(id, byModel.get(id)[0].ac.model); }
+  while (keptModels.size > MAX_KEPT_MODELS) keptModels.delete(keptModels.keys().next().value);
+  if (state.quality !== 'high') keptModels.clear();
+  for (const [modelId, info] of keptModels) {
+    const data = byModel.get(modelId) || NO_DATA;
     layers.push(new ScenegraphLayer({
-      id: `model-${modelId}`, data, scenegraph: info.url, getPosition: (d) => d.pos,
+      id: `model-${modelId}`, data, visible: data.length > 0, scenegraph: info.url, getPosition: (d) => d.pos,
       getOrientation: orientation,
       // Real model scale (metres) times the per-aircraft zoom enlargement.
       sizeScale: 1,
@@ -581,6 +591,20 @@ function buildLayers(now) {
 
 /** Model ids whose ScenegraphLayer has finished loading, read back from deck.gl after each frame. */
 let loadedModels = new Set();
+let detailedOn = false;          // zoom LOD state (with hysteresis)
+const keptModels = new Map();    // modelId -> model info, in least-recently-used order
+const NO_DATA = [];
+
+function loadQuality() {
+  const q = new URLSearchParams(location.search).get('quality'); // ?quality=low|high overrides
+  if (q === 'low' || q === 'high') return q;
+  try { return localStorage.getItem('vatsim3d.quality') === 'low' ? 'low' : 'high'; } catch { return 'high'; }
+}
+function setQuality(q) {
+  state.quality = q;
+  try { localStorage.setItem('vatsim3d.quality', q); } catch { /* private mode: not remembered */ }
+  for (const b of document.querySelectorAll('#quality button')) b.setAttribute('aria-checked', String(b.dataset.q === q));
+}
 function modelLayersLoaded() {
   const lm = overlay._deck?.layerManager; // deck.gl's layer manager (instances, not descriptors)
   if (!lm) return loadedModels;
@@ -592,8 +616,18 @@ function modelLayersLoaded() {
 }
 
 let lastFrame = 0;
+// ?perf in the URL logs frame timing every 5 s (for checking zoomed-in smoothness).
+const PERF = new URLSearchParams(location.search).has('perf') ? { n: 0, worst: 0, sum: 0, t0: performance.now(), prev: 0 } : null;
 function frame(now) {
   requestAnimationFrame(frame);
+  if (PERF) {
+    if (PERF.prev) { const dt = now - PERF.prev; PERF.n++; PERF.sum += dt; PERF.worst = Math.max(PERF.worst, dt); }
+    PERF.prev = now;
+    if (now - PERF.t0 > 5000) {
+      console.log(`perf z${map.getZoom().toFixed(1)} ${state.quality}: ${(1000 * PERF.n / (now - PERF.t0)).toFixed(0)} fps, avg ${(PERF.sum / PERF.n).toFixed(1)} ms, worst ${PERF.worst.toFixed(0)} ms, models loaded ${loadedModels.size}`);
+      Object.assign(PERF, { n: 0, worst: 0, sum: 0, t0: now });
+    }
+  }
   if (now - lastFrame < 33) return; // ~30 fps is plenty
   lastFrame = now;
   const t = Date.now();
@@ -817,6 +851,8 @@ bindRange('size', 'size-out', (v) => `${v.toFixed(2)}×`, (v) => { state.size = 
 for (const key of Object.keys(state.show)) {
   $(`t-${key}`).addEventListener('change', (e) => { state.show[key] = e.target.checked; });
 }
+for (const b of document.querySelectorAll('#quality button')) b.onclick = () => setQuality(b.dataset.q);
+setQuality(state.quality);
 $('basemap').addEventListener('change', (e) => map.setStyle(BASEMAPS[e.target.value]));
 $('view-3d').onclick = () => state.airport && map.easeTo({ center: [state.airport.lon, state.airport.lat], zoom: 9.6, pitch: 62, bearing: -25, duration: 900 });
 $('view-top').onclick = () => map.easeTo({ pitch: 0, bearing: 0, duration: 900 });
