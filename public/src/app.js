@@ -1,5 +1,5 @@
 import { buildAircraftMesh } from './mesh.js';
-import { fetchFeed, findAirport, loadRunways } from './data.js';
+import { fetchFeed, findAirport, airportsNear } from './data.js';
 
 const { MapboxOverlay, SimpleMeshLayer, PathLayer, LineLayer, TextLayer, ScatterplotLayer } = deck;
 
@@ -15,6 +15,8 @@ const MAX_EXTRAP_S = 30;   // don't dead-reckon further than this past the last 
 const BLEND_MS = 2000;     // smoothing window when a new report corrects our prediction
 const TRAIL_POINTS = 60;   // ~15 min of history at 15 s
 const GROUND_GS = 45;      // kt — below this and near field elevation → on ground
+const MIN_RUNWAY_FT = 4000;   // nearby airfields shown automatically (smaller ones only when active)
+const MAJOR_RUNWAY_FT = 6500; // gets a large label and extended centrelines
 
 const COLORS = {
   dep: [255, 159, 67],
@@ -47,7 +49,10 @@ function rasterStyle(url, attribution) {
 // State
 // ---------------------------------------------------------------------------
 const state = {
-  airport: null,          // { icao, name, lat, lon, fir, atcPrefixes, elevFt }
+  airport: null,          // primary: { icao, name, lat, lon, fir, atcPrefixes, elevFt }
+  nearby: new Map(),      // every airfield within the radius: icao -> { icao, name, lat, lon, distNm, runways, maxRunwayFt, elevFt }
+  shown: [],              // the subset drawn on the map (significant or active)
+  activity: new Map(),    // icao -> { dep, arr, gnd, atc }
   runways: [],
   radiusNm: 40,
   exag: 1,
@@ -108,14 +113,35 @@ function angleDiff(a, b) { return ((b - a + 540) % 360) - 180; }
 // ---------------------------------------------------------------------------
 function fieldElevFt() { return state.airport?.elevFt ?? 0; }
 
-function category(fp, icao) {
-  if (!fp) return 'other';
-  const dep = fp.departure === icao;
-  const arr = fp.arrival === icao;
-  if (dep && arr) return 'local';
-  if (dep) return 'dep';
-  if (arr) return 'arr';
-  return 'other';
+/**
+ * Classify a flight against every airfield in range (not just the primary one).
+ * If both ends are nearby (e.g. EGLL→EGKK), the end the aircraft is currently closer to wins.
+ */
+function category(fp, lat, lon) {
+  if (!fp) return { cat: 'other', apt: null };
+  const d = state.nearby.get(fp.departure);
+  const a = state.nearby.get(fp.arrival);
+  if (d && a) {
+    if (d === a) return { cat: 'local', apt: d.icao };
+    return distanceNm(lat, lon, d.lat, d.lon) <= distanceNm(lat, lon, a.lat, a.lon)
+      ? { cat: 'dep', apt: d.icao }
+      : { cat: 'arr', apt: a.icao };
+  }
+  if (d) return { cat: 'dep', apt: d.icao };
+  if (a) return { cat: 'arr', apt: a.icao };
+  return { cat: 'other', apt: null };
+}
+
+/** Elevation of the field an aircraft belongs to (or the nearest one), for on-ground detection. */
+function refElevFt(apt, lat, lon) {
+  const own = apt && state.nearby.get(apt);
+  if (own) return own.elevFt;
+  let best = null, bestD = Infinity;
+  for (const ap of state.shown) {
+    const dd = distanceNm(lat, lon, ap.lat, ap.lon);
+    if (dd < bestD) { bestD = dd; best = ap; }
+  }
+  return best && bestD < 5 ? best.elevFt : fieldElevFt();
 }
 
 /** Raw dead-reckoned position at local time `now` (no smoothing). */
@@ -166,8 +192,9 @@ function ingestFeed(feed) {
     seen.add(p.callsign);
 
     const t = Date.parse(p.last_updated) + state.clockOffset;
-    const onGround = p.groundspeed < GROUND_GS && p.altitude - fieldElevFt() < 300;
     const fp = p.flight_plan;
+    const { cat, apt } = category(fp, p.latitude, p.longitude);
+    const onGround = p.groundspeed < GROUND_GS && p.altitude - refElevFt(apt, p.latitude, p.longitude) < 300;
     const base = { lat: p.latitude, lon: p.longitude, alt: p.altitude, hdg: p.heading, gs: p.groundspeed, t };
 
     let ac = existing;
@@ -203,7 +230,8 @@ function ingestFeed(feed) {
     ac.rules = fp?.flight_rules || '';
     ac.cruise = fp?.altitude || '';
     ac.route = fp?.route || '';
-    ac.cat = category(fp, ap.icao);
+    ac.cat = cat;
+    ac.apt = apt;
     ac.distNm = d;
 
     const last = ac.history[ac.history.length - 1];
@@ -216,19 +244,58 @@ function ingestFeed(feed) {
   for (const cs of state.aircraft.keys()) if (!seen.has(cs)) state.aircraft.delete(cs);
   if (state.selected && !state.aircraft.has(state.selected)) select(null);
 
-  // ATC: controllers whose callsign prefix matches the airport, its IATA code or its FIR.
-  const prefixes = ap.atcPrefixes;
+  // ATC: controllers for any airfield in range, plus the primary's IATA code and FIR (e.g. LON_, LTC_).
+  const prefixOf = (cs) => cs.split('_')[0].toUpperCase();
+  const isRelevant = (cs) => ap.atcPrefixes.has(prefixOf(cs)) || state.nearby.has(prefixOf(cs));
   const atc = feed.controllers
-    .filter((c) => c.facility > 0 && prefixes.has(c.callsign.split('_')[0].toUpperCase()))
+    .filter((c) => c.facility > 0 && isRelevant(c.callsign))
     .map((c) => ({ callsign: c.callsign, freq: c.frequency, name: c.name, atis: null }));
   for (const a of feed.atis || []) {
-    if (a.callsign.split('_')[0].toUpperCase() === ap.icao) {
+    if (state.nearby.has(prefixOf(a.callsign))) {
       atc.push({ callsign: a.callsign, freq: a.frequency, name: a.name, atis: (a.text_atis || []).join(' '), code: a.atis_code });
     }
   }
-  state.atc = atc.sort((a, b) => atcRank(a.callsign) - atcRank(b.callsign) || a.callsign.localeCompare(b.callsign));
+  // Primary airport first, then other fields by distance, then centre/FIR; within each, DEL→GND→TWR→APP→CTR.
+  const groupRank = (cs) => {
+    const p = prefixOf(cs);
+    if (p === ap.icao) return -1;
+    const n = state.nearby.get(p);
+    return n ? n.distNm : 1e6;
+  };
+  state.atc = atc.sort((a, b) => groupRank(a.callsign) - groupRank(b.callsign)
+    || atcRank(a.callsign) - atcRank(b.callsign) || a.callsign.localeCompare(b.callsign));
   state.lastFeed = feed.general.update_timestamp;
+
+  // Activity per airfield, then decide which airfields to draw.
+  const activity = new Map();
+  const bump = (icao, key) => {
+    if (!icao) return;
+    const a = activity.get(icao) || { dep: 0, arr: 0, gnd: 0, atc: 0 };
+    a[key]++;
+    activity.set(icao, a);
+  };
+  for (const ac of state.aircraft.values()) {
+    if (ac.onGround) bump(ac.apt, 'gnd');
+    else if (ac.cat === 'dep' || ac.cat === 'local') bump(ac.apt, 'dep');
+    else if (ac.cat === 'arr') bump(ac.apt, 'arr');
+  }
+  for (const a of atc) if (state.nearby.has(prefixOf(a.callsign))) bump(prefixOf(a.callsign), 'atc');
+  state.activity = activity;
+  updateShownAirports();
   renderSidebar();
+}
+
+/** Airfields to draw: the primary, every field with a decent runway, and any small field with traffic or ATC. */
+function updateShownAirports() {
+  const primary = state.airport?.icao;
+  state.shown = [...state.nearby.values()].filter((a) =>
+    a.icao === primary || a.maxRunwayFt >= MIN_RUNWAY_FT || state.activity.has(a.icao));
+  state.runways = state.shown.flatMap((a) => a.runways.map((r) => ({ ...r, icao: a.icao, major: a.icao === primary || a.maxRunwayFt >= MAJOR_RUNWAY_FT })));
+}
+
+function isActive(icao) {
+  const a = state.activity.get(icao);
+  return !!a && a.dep + a.arr + a.gnd + a.atc > 0;
 }
 
 function atcRank(cs) {
@@ -270,11 +337,17 @@ const overlay = new MapboxOverlay({
   interleaved: false,
   layers: [],
   getTooltip: ({ object, layer }) => {
+    if (object && layer?.id === 'airports') {
+      const a = state.activity.get(object.icao);
+      const act = a ? `\n${a.dep} dep · ${a.arr} arr · ${a.gnd} gnd · ${a.atc} ATC` : '\nno traffic';
+      return { text: `${object.icao}  ${object.name}${act}${object.icao === state.airport?.icao ? '' : '\nclick to centre here'}` };
+    }
     if (!object || !layer || !['aircraft', 'labels', 'pick'].includes(layer.id)) return null;
     const ac = object.ac || object;
     return { text: `${ac.callsign}  ${ac.type || ''}\n${ac.dep || '----'} → ${ac.arr || '----'}\n${formatAlt(ac.base.alt)}  ${ac.base.gs} kt` };
   },
   onClick: ({ object, layer }) => {
+    if (object && layer?.id === 'airports') { if (object.icao !== state.airport?.icao) setAirport(object.icao); return; }
     if (object && layer && ['aircraft', 'labels', 'pick'].includes(layer.id)) select((object.ac || object).callsign);
   },
 });
@@ -331,14 +404,16 @@ function buildLayers(now) {
     }));
   }
 
-  // Runways (true width) plus faint 15 NM extended centrelines.
+  // Runways (true width) for every shown airfield, plus faint extended centrelines at the major ones.
   if (state.runways.length) {
     const centrelines = [];
     for (const rw of state.runways) {
+      if (!rw.major) continue;
       const [lon1, lat1] = rw.lePos, [lon2, lat2] = rw.hePos;
+      const len = (rw.icao === ap.icao ? 15 : 10) * NM;
       const brg = bearingDeg(lat1, lon1, lat2, lon2);
-      const [aLat, aLon] = offset(lat1, lon1, brg + 180, 15 * NM);
-      const [bLat, bLon] = offset(lat2, lon2, brg, 15 * NM);
+      const [aLat, aLon] = offset(lat1, lon1, brg + 180, len);
+      const [bLat, bLon] = offset(lat2, lon2, brg, len);
       centrelines.push({ path: [[aLon, aLat], rw.lePos] }, { path: [rw.hePos, [bLon, bLat]] });
     }
     layers.push(new PathLayer({
@@ -349,13 +424,35 @@ function buildLayers(now) {
       id: 'runways', data: state.runways, getPath: (d) => [d.lePos, d.hePos], getColor: [205, 214, 226, 230],
       widthUnits: 'meters', getWidth: (d) => d.widthM, widthMinPixels: 3, capRounded: false,
     }));
-    const ends = state.runways.flatMap((r) => [{ t: r.le, p: r.lePos, o: r.hePos }, { t: r.he, p: r.hePos, o: r.lePos }]);
+    // Runway numbers: always at the primary, elsewhere only once zoomed in.
+    const showAllEnds = map.getZoom() >= 10.8;
+    const ends = state.runways
+      .filter((r) => showAllEnds || r.icao === ap.icao)
+      .flatMap((r) => [{ t: r.le, p: r.lePos, o: r.hePos }, { t: r.he, p: r.hePos, o: r.lePos }]);
     layers.push(new TextLayer({
       id: 'runway-labels', data: ends,
       // Push each label slightly beyond its threshold.
       getPosition: (d) => { const b = bearingDeg(d.o[1], d.o[0], d.p[1], d.p[0]); const [la, lo] = offset(d.p[1], d.p[0], b, 350); return [lo, la]; },
       getText: (d) => d.t, getSize: 12, getColor: [230, 236, 244, 230], fontWeight: 700,
       fontFamily: 'ui-monospace, Consolas, monospace',
+    }));
+  }
+
+  // Airfield name tags: bigger for the primary/major fields, brighter when there's traffic or ATC.
+  if (state.shown.length) {
+    const zoomedIn = map.getZoom() >= 10.8;
+    layers.push(new TextLayer({
+      id: 'airports', data: state.shown, pickable: true,
+      getPosition: (d) => [d.lon, d.lat, 0],
+      getText: (d) => d.icao,
+      getSize: (d) => (d.icao === ap.icao ? 17 : d.maxRunwayFt >= MAJOR_RUNWAY_FT ? 14 : 11),
+      getColor: (d) => (d.icao === ap.icao ? [255, 255, 255, 255] : isActive(d.icao) ? [120, 225, 255, 245] : [150, 162, 178, 190]),
+      // Sit beside the field when zoomed out; above the runways when close in.
+      getPixelOffset: zoomedIn ? [0, -40] : [0, -18],
+      fontFamily: 'ui-monospace, Consolas, monospace', fontWeight: 700,
+      background: true, getBackgroundColor: [8, 12, 18, 150], backgroundPadding: [4, 1],
+      parameters: { depthCompare: 'always' },
+      updateTriggers: { getColor: [state.airport?.icao, state.lastFeed], getSize: state.airport?.icao },
     }));
   }
 
@@ -468,12 +565,31 @@ function renderSidebar() {
     }
   }
 
+  // Nearby airfields: active ones first, then by distance. Click to make one the centre.
+  const apList = $('airport-list');
+  apList.replaceChildren();
+  const fields = [...state.shown].sort((a, b) =>
+    (b.icao === state.airport.icao) - (a.icao === state.airport.icao) || isActive(b.icao) - isActive(a.icao) || a.distNm - b.distNm);
+  for (const f of fields) {
+    const a = state.activity.get(f.icao);
+    const parts = a ? [a.dep && `${a.dep}↑`, a.arr && `${a.arr}↓`, a.gnd && `${a.gnd} gnd`, a.atc && `${a.atc} ATC`].filter(Boolean) : [];
+    const right = (parts.join(' ') || '–') + (f.icao === state.airport.icao ? '' : `  ${f.distNm.toFixed(0)}nm`);
+    const item = li(f.icao, right, f.icao === state.airport.icao ? 'sel' : 'clickable');
+    item.title = f.name;
+    if (!isActive(f.icao)) item.classList.add('dim');
+    if (f.icao !== state.airport.icao) item.onclick = () => setAirport(f.icao);
+    apList.append(item);
+  }
+
   const traffic = $('traffic-list');
   traffic.replaceChildren();
   const sorted = all.sort((a, b) => a.onGround - b.onGround || a.distNm - b.distNm);
   if (!sorted.length) traffic.append(li('No traffic in range', null, 'empty'));
   for (const ac of sorted) {
-    const right = ac.onGround ? `GND ${ac.dep || ''}→${ac.arr || ''}` : `${formatAlt(ac.base.alt)} ${ac.distNm.toFixed(0)}nm`;
+    const dir = ac.cat === 'arr' ? '↓' : ac.cat === 'dep' || ac.cat === 'local' ? '↑' : '';
+    const right = ac.onGround
+      ? `GND ${ac.apt || ''}`
+      : `${formatAlt(ac.base.alt)} ${ac.apt ? dir + ac.apt : `${ac.distNm.toFixed(0)}nm`}`;
     const item = li(ac.callsign, right, 'clickable');
     const dot = document.createElement('span');
     dot.className = 'dot';
@@ -559,20 +675,33 @@ async function setAirport(icao) {
   if (!ap) { setStatus(`Unknown airport: ${icao}`); return; }
   state.airport = { ...ap, elevFt: 0 };
   state.aircraft.clear();
+  state.nearby = new Map();
+  state.shown = [];
   state.runways = [];
+  state.activity = new Map();
   select(null);
   $('icao').value = ap.icao;
   $('airport-name').textContent = ap.name;
   document.title = `${ap.icao} · VATSIM 3D`;
   history.replaceState(null, '', `#${ap.icao}`);
   map.flyTo({ center: [ap.lon, ap.lat], zoom: 9.6, pitch: 62, bearing: -25, duration: 1500 });
-  poll();
 
-  const runways = await loadRunways(ap.icao);
+  setStatus('Loading airfields and runways…');
+  await refreshNearby();
   if (state.airport?.icao !== ap.icao) return;
-  state.runways = runways;
-  const elevs = runways.map((r) => r.elevFt).filter((e) => e != null);
-  if (elevs.length) state.airport.elevFt = elevs.reduce((a, b) => a + b, 0) / elevs.length;
+  poll();
+}
+
+/** Re-scan airfields within the radius (on airport change or radius change). */
+async function refreshNearby() {
+  const ap = state.airport;
+  if (!ap) return;
+  const list = await airportsNear(ap.lat, ap.lon, state.radiusNm);
+  if (state.airport !== ap) return;
+  state.nearby = new Map(list.map((a) => [a.icao, a]));
+  const self = state.nearby.get(ap.icao);
+  if (self) state.airport.elevFt = self.elevFt;
+  updateShownAirports();
 }
 
 // ---------------------------------------------------------------------------
@@ -589,7 +718,7 @@ function bindRange(id, outId, fmt, apply) {
 bindRange('radius', 'radius-out', (v) => `${v} NM`, (v) => {
   const changed = v !== state.radiusNm;
   state.radiusNm = v;
-  if (changed) { clearTimeout(bindRange.t); bindRange.t = setTimeout(poll, 400); }
+  if (changed) { clearTimeout(bindRange.t); bindRange.t = setTimeout(() => refreshNearby().then(poll), 400); }
 });
 bindRange('exag', 'exag-out', (v) => `${v.toFixed(1)}×`, (v) => { state.exag = v; });
 bindRange('size', 'size-out', (v) => `${v.toFixed(2)}×`, (v) => { state.size = v; });

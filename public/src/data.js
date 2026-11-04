@@ -37,7 +37,7 @@ function parseVatspy(text) {
     const f = line.split('|');
     if (section === '[Airports]' && f.length >= 6) {
       const icao = f[0].toUpperCase();
-      if (!airports[icao]) airports[icao] = { icao, name: f[1], lat: +f[2], lon: +f[3], iata: f[4], fir: f[5] };
+      if (!airports[icao]) airports[icao] = { icao, name: f[1], lat: +f[2], lon: +f[3], iata: f[4], fir: f[5], pseudo: f[6] === '1' };
     } else if (section === '[FIRs]' && f.length >= 3) {
       const fir = f[0].split('-')[0].toUpperCase();
       const prefix = (f[2] || '').split('_')[0].toUpperCase();
@@ -77,34 +77,73 @@ function splitCsv(line) {
   return out;
 }
 
-/** Returns [{ le, he, lePos:[lon,lat], hePos:[lon,lat], widthM, elevFt }] for an airport. */
-export async function loadRunways(icao) {
+/**
+ * Parses OurAirports runways.csv once into Map<ICAO, [{ le, he, lePos, hePos, widthM, lengthFt, elevFt }]>.
+ * Resolves to an empty map if the file can't be fetched (airports then show without runways).
+ */
+export function loadRunwayIndex() {
   if (!runwaysPromise) {
     runwaysPromise = fetch(RUNWAYS_URL)
       .then((r) => (r.ok ? r.text() : Promise.reject(new Error(`runways HTTP ${r.status}`))))
-      .catch((err) => { console.warn('Runway data unavailable', err); runwaysPromise = null; return ''; });
+      .then(parseRunways)
+      .catch((err) => { console.warn('Runway data unavailable', err); runwaysPromise = null; return new Map(); });
   }
-  const text = await runwaysPromise;
-  const needle = `,"${icao.toUpperCase()}",`;
-  const result = [];
-  for (const line of text.split('\n')) {
-    if (!line.includes(needle)) continue;
+  return runwaysPromise;
+}
+
+function parseRunways(text) {
+  const index = new Map();
+  const lines = text.split('\n');
+  for (let i = 1; i < lines.length; i++) {
+    const line = lines[i];
+    if (!line) continue;
     const f = splitCsv(line);
     // id, airport_ref, airport_ident, length_ft, width_ft, surface, lighted, closed,
     // le_ident, le_lat, le_lon, le_elev, le_hdg, le_disp, he_ident, he_lat, he_lon, he_elev, ...
     if (f[7] === '1') continue;
     const leLat = parseFloat(f[9]), leLon = parseFloat(f[10]);
     const heLat = parseFloat(f[15]), heLon = parseFloat(f[16]);
-    if (![leLat, leLon, heLat, heLon].every(Number.isFinite)) continue;
+    if (!(Number.isFinite(leLat) && Number.isFinite(leLon) && Number.isFinite(heLat) && Number.isFinite(heLon))) continue;
     const elevs = [parseFloat(f[11]), parseFloat(f[17])].filter(Number.isFinite);
-    result.push({
+    const icao = f[2].toUpperCase();
+    let list = index.get(icao);
+    if (!list) index.set(icao, (list = []));
+    list.push({
       le: f[8], he: f[14],
       lePos: [leLon, leLat], hePos: [heLon, heLat],
       widthM: (parseFloat(f[4]) || 150) * 0.3048,
+      lengthFt: parseFloat(f[3]) || 0,
       elevFt: elevs.length ? elevs.reduce((a, b) => a + b, 0) / elevs.length : null,
     });
   }
-  return result;
+  return index;
+}
+
+/** All VATSpy airports (non-pseudo) within `radiusNm` of a point, with their runways attached. */
+export async function airportsNear(lat, lon, radiusNm) {
+  const [{ airports }, runwayIndex] = await Promise.all([loadVatspy(), loadRunwayIndex()]);
+  const out = [];
+  const dLat = radiusNm / 60;
+  const dLon = dLat / Math.max(0.1, Math.cos((lat * Math.PI) / 180));
+  for (const ap of Object.values(airports)) {
+    if (ap.pseudo || Math.abs(ap.lat - lat) > dLat || Math.abs(ap.lon - lon) > dLon) continue;
+    const distNm = haversineNm(lat, lon, ap.lat, ap.lon);
+    if (distNm > radiusNm) continue;
+    const runways = runwayIndex.get(ap.icao) || [];
+    const elevs = runways.map((r) => r.elevFt).filter((e) => e != null);
+    out.push({
+      icao: ap.icao, name: ap.name, lat: ap.lat, lon: ap.lon, distNm, runways,
+      maxRunwayFt: runways.reduce((m, r) => Math.max(m, r.lengthFt), 0),
+      elevFt: elevs.length ? elevs.reduce((a, b) => a + b, 0) / elevs.length : 0,
+    });
+  }
+  return out.sort((a, b) => a.distNm - b.distNm);
+}
+
+function haversineNm(lat1, lon1, lat2, lon2) {
+  const r = (d) => (d * Math.PI) / 180;
+  const a = Math.sin(r(lat2 - lat1) / 2) ** 2 + Math.cos(r(lat1)) * Math.cos(r(lat2)) * Math.sin(r(lon2 - lon1) / 2) ** 2;
+  return 2 * 3440.065 * Math.asin(Math.sqrt(a));
 }
 
 // --- Live feed -------------------------------------------------------------
