@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>VATSIM 3D</title>
+  <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css" />
+  <link rel="stylesheet" href="style.css" />
+  <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+  <script src="https://unpkg.com/deck.gl@9.0.38/dist.min.js"></script>
+</head>
+<body>
+  <div id="map"></div>
+
+  <aside id="panel">
+    <header class="brand">
+      <div>
+        <h1>VATSIM 3D</h1>
+        <div class="sub">Live traffic around one airport</div>
+      </div>
+      <button id="collapse" class="icon-btn" title="Hide panel">‹</button>
+    </header>
+
+    <form id="airport-form" class="row">
+      <input id="icao" maxlength="4" spellcheck="false" autocomplete="off" placeholder="ICAO" value="EGLL" />
+      <button type="submit">Go</button>
+    </form>
+    <div id="airport-name" class="muted"></div>
+
+    <section class="stats">
+      <div><span id="stat-air">–</span><label>airborne</label></div>
+      <div><span id="stat-gnd">–</span><label>on ground</label></div>
+      <div><span id="stat-atc">–</span><label>ATC</label></div>
+    </section>
+    <div id="status" class="muted small">Loading…</div>
+
+    <section id="selected" hidden>
+      <div class="sel-head">
+        <strong id="sel-callsign"></strong>
+        <span id="sel-type" class="pill"></span>
+        <button id="sel-close" class="icon-btn" title="Deselect">×</button>
+      </div>
+      <div id="sel-route" class="route"></div>
+      <dl id="sel-grid" class="grid"></dl>
+      <div class="row">
+        <button id="sel-follow">Follow</button>
+        <button id="sel-fly">Fly to</button>
+      </div>
+    </section>
+
+    <details open>
+      <summary>Display</summary>
+      <label class="slider">Radius <output id="radius-out">40 NM</output>
+        <input id="radius" type="range" min="10" max="150" step="5" value="40" /></label>
+      <label class="slider">Altitude exaggeration <output id="exag-out">1.0×</output>
+        <input id="exag" type="range" min="1" max="6" step="0.5" value="1" /></label>
+      <label class="slider">Aircraft size <output id="size-out">1.0×</output>
+        <input id="size" type="range" min="0.5" max="3" step="0.25" value="1" /></label>
+      <div class="toggles">
+        <label><input type="checkbox" id="t-labels" checked /> Labels</label>
+        <label><input type="checkbox" id="t-trails" checked /> Trails</label>
+        <label><input type="checkbox" id="t-stalks" checked /> Altitude lines</label>
+        <label><input type="checkbox" id="t-rings" checked /> Range rings</label>
+        <label><input type="checkbox" id="t-ground" checked /> Ground traffic</label>
+      </div>
+      <label class="slider">Basemap
+        <select id="basemap">
+          <option value="dark">Dark (CARTO)</option>
+          <option value="light">Light (CARTO)</option>
+          <option value="satellite">Satellite (Esri)</option>
+          <option value="osm">OpenStreetMap</option>
+        </select></label>
+      <div class="row">
+        <button id="view-3d">3D view</button>
+        <button id="view-top">Top down</button>
+      </div>
+    </details>
+
+    <details open>
+      <summary>Legend</summary>
+      <ul class="legend">
+        <li><i style="background:#ff9f43"></i> Departing</li>
+        <li><i style="background:#3ad1ff"></i> Arriving</li>
+        <li><i style="background:#c792ff"></i> Local (dep = arr)</li>
+        <li><i style="background:#d7dde5"></i> Other / overflight</li>
+      </ul>
+    </details>
+
+    <details open>
+      <summary>Online ATC</summary>
+      <ul id="atc-list" class="list"></ul>
+    </details>
+
+    <details open>
+      <summary>Traffic</summary>
+      <ul id="traffic-list" class="list"></ul>
+    </details>
+
+    <footer class="muted small">
+      Data: <a href="https://vatsim.dev/services/apis" target="_blank" rel="noopener">VATSIM Data API</a>,
+      VATSpy, OurAirports. Not for real-world navigation.
+    </footer>
+  </aside>
+  <button id="expand" class="icon-btn floating" title="Show panel" hidden>›</button>
+
+  <script type="module" src="src/app.js"></script>
+</body>
+</html>
