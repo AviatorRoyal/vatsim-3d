@@ -16,6 +16,10 @@ The site is the static `public/` folder, so it runs from any static host. Full f
 - **GitHub Pages**: <https://aviatorroyal.github.io/vatsim-3d/>. `.github/workflows/pages.yml` publishes `public/` on every push to `main`.
 - **EC2 (ap-south-1)**: <http://16.4.34.135/>. nginx serves `/var/www/vatsim-3d` and the flight-path API. Run `deploy/deploy-ec2.sh` to push updates (site and API). It defaults to `~/Downloads/ec2_in.pem` and `ubuntu@16.4.34.135`.
 
+### Scanner blocking
+
+Bots scan every public server for leaked secrets (`/.env`, `/.git/config`, `info.php` …). nginx closes those requests without replying (dotfiles other than `/.well-known/`, and any `.php`). fail2ban's `nginx-probe` jail (`deploy/fail2ban/`) bans an address after 3 such requests in 10 minutes: 1 day at first, doubling for repeat offenders up to 4 weeks. Localhost and the Tailscale network are never banned. Check it with `sudo fail2ban-client status nginx-probe`, and unban with `sudo fail2ban-client set nginx-probe unbanip <ip>`.
+
 ### Flight-path store (`server/tracks.mjs`)
 
 A small Node service (no dependencies) on the EC2 host records the path of **every** pilot on VATSIM, so a trail shows the whole flight so far, not just the part this page has seen.

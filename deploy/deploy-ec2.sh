@@ -15,6 +15,7 @@ STAGE="$(mktemp -d)"
 trap 'rm -rf "$STAGE"' EXIT
 mkdir -p "$STAGE/public"
 cp -r "$ROOT/public/." "$STAGE/public/"
+cp -r "$ROOT/deploy/fail2ban" "$STAGE/"
 cp "$ROOT/server/tracks.mjs" "$ROOT"/deploy/vatsim-tracks.service "$ROOT"/deploy/nginx-vatsim-3d-*.conf "$ROOT/deploy/remote-install.sh" "$STAGE/"
 
 tar czf - -C "$STAGE" . | ssh -i "$KEY" "$HOST" \

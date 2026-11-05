@@ -1,0 +1,17 @@
+# Installed as /etc/fail2ban/jail.d/vatsim-3d.local by deploy/remote-install.sh.
+[DEFAULT]
+# Never ban the host itself or the Tailscale network (the k3s cluster talks over it).
+ignoreip = 127.0.0.1/8 ::1 100.64.0.0/10 fd7a:115c:a1e0::/48
+# Repeat offenders get longer bans: 1 day, 2 days, 4 days … up to 4 weeks.
+bantime.increment = true
+bantime.maxtime = 4w
+
+[nginx-probe]
+enabled  = true
+port     = http,https
+filter   = nginx-probe
+logpath  = /var/log/nginx/access.log
+backend  = auto
+maxretry = 3
+findtime = 10m
+bantime  = 1d

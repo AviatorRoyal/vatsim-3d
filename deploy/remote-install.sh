@@ -29,6 +29,13 @@ write_nginx() {
 }
 write_nginx
 
+# Scanner blocking: fail2ban bans addresses that probe for .env, .git, PHP etc.
+command -v fail2ban-client >/dev/null || sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq fail2ban
+sudo cp "$B/fail2ban/nginx-probe.conf" /etc/fail2ban/filter.d/nginx-probe.conf
+sudo cp "$B/fail2ban/vatsim-3d.local" /etc/fail2ban/jail.d/vatsim-3d.local
+sudo systemctl enable -q fail2ban
+sudo systemctl restart fail2ban
+
 if [ "${HTTPS:-0}" = 1 ] && ! sudo test -f "$CERT"; then
   command -v certbot >/dev/null || sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq certbot
   sudo certbot certonly -n --agree-tos --register-unsafely-without-email --webroot -w /var/www/acme -d "$DOMAIN" \
@@ -37,4 +44,4 @@ if [ "${HTTPS:-0}" = 1 ] && ! sudo test -f "$CERT"; then
 fi
 
 sleep 2
-echo "vatsim-tracks: $(systemctl is-active vatsim-tracks)  https: $(sudo test -f "$CERT" && echo yes || echo no)"
+echo "fail2ban: $(systemctl is-active fail2ban)  vatsim-tracks: $(systemctl is-active vatsim-tracks)  https: $(sudo test -f "$CERT" && echo yes || echo no)"
